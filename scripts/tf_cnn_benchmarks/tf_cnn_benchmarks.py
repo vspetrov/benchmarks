@@ -99,6 +99,8 @@ tf.flags.DEFINE_string('local_parameter_device', 'gpu',
                           of variables happens.""")
 tf.flags.DEFINE_string('device', 'gpu',
                        """Device to use for computation: cpu or gpu""")
+tf.flags.DEFINE_string('horovod_device', '',
+                       """Device to do allreduce on: default, cpu or gpu""")
 tf.flags.DEFINE_string('data_format', 'NCHW',
                        """Data layout to use: NHWC (TF native)
                        or NCHW (cuDNN native).""")
@@ -733,6 +735,12 @@ class BenchmarkCNN(object):
     # Device to use for ops that need to always run on the local worker's CPU.
     self.cpu_device = '/cpu:0'
 
+    # Device to use for Horovod allreduce.
+    if FLAGS.horovod_device:
+      self.horovod_device = '/%s:0' % FLAGS.horovod_device
+    else:
+      self.horovod_device = ''
+
     # Device to use for ops that need to always run on the local worker's
     # compute device, and never on a parameter server device.
     self.device = '%s:0' % FLAGS.device
@@ -985,7 +993,7 @@ class BenchmarkCNN(object):
         raise ValueError('Optimizer "%s" was not recognized', FLAGS.optimizer)
 
       # wrap in MPI optimizer
-      opt = hvd.DistributedOptimizer(opt)
+      opt = hvd.DistributedOptimizer(opt, device_dense=self.horovod_device)
 
       device_grads = opt.compute_gradients(total_loss)
       if gradient_clip is not None:
