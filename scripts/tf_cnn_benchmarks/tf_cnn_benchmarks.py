@@ -101,6 +101,11 @@ tf.flags.DEFINE_string('device', 'gpu',
                        """Device to use for computation: cpu or gpu""")
 tf.flags.DEFINE_string('horovod_device', '',
                        """Device to do allreduce on: default, cpu or gpu""")
+tf.flags.DEFINE_boolean('horovod_allreduce', True,
+                        """Enable/disable Horovod Allreduce. If Horovod Allreduce is
+                           disabled, all the workers will be doing independent
+                           computation during an MPI run. This is useful to determine
+                           slower GPU cards or servers.""")
 tf.flags.DEFINE_string('data_format', 'NCHW',
                        """Data layout to use: NHWC (TF native)
                        or NCHW (cuDNN native).""")
@@ -993,7 +998,8 @@ class BenchmarkCNN(object):
         raise ValueError('Optimizer "%s" was not recognized', FLAGS.optimizer)
 
       # wrap in MPI optimizer
-      opt = hvd.DistributedOptimizer(opt, device_dense=self.horovod_device)
+      if FLAGS.horovod_allreduce:
+        opt = hvd.DistributedOptimizer(opt, device_dense=self.horovod_device)
 
       device_grads = opt.compute_gradients(total_loss)
       if gradient_clip is not None:
