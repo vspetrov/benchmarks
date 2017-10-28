@@ -279,6 +279,10 @@ _DEFAULT_PARAMS = {
     #       in a single session, using all-reduce to mutally reduce the
     #       gradients.  Uses no parameter servers.  When there is only one
     #       worker, this is the same as replicated.
+    #   horovod: Distributed training using Horovod library. Runs workers using
+    #       an MPI framework (e.g. Open MPI). Each worker runs training on
+    #       single GPU, and averages gradients using NCCL or MPI all-reduce.
+    #       See https://github.com/uber/horovod for more details.
     'variable_update':
         _ParamSpec('string', 'parameter_server',
                    'The method for managing variables: parameter_server, '
@@ -327,7 +331,9 @@ _DEFAULT_PARAMS = {
     'horovod_device':
         _ParamSpec('string', '',
                    'Device to do Horovod all-reduce on: empty (default), '
-                   'cpu or gpu'),
+                   'cpu or gpu. Default with utilize GPU if Horovod was '
+                   'compiled with the HOROVOD_GPU_ALLREDUCE option, and '
+                   'CPU otherwise.'),
 
     # Summary and Save & load checkpoints.
     'summary_verbosity':
@@ -679,6 +685,9 @@ class BenchmarkCNN(object):
         self.params.all_reduce_spec):
       raise ValueError('fp16 variables are not supported with NCCL')
 
+    if self.params.variable_update == 'horovod' and self.params.num_gpus > 1:
+      raise ValueError('Horovod benchmarks require num_gpus=1 on each worker')
+
     # Use the batch size from the command line if specified, otherwise use the
     # model's default batch size.  Scale the benchmark's batch size by the
     # number of GPUs.
@@ -759,14 +768,11 @@ class BenchmarkCNN(object):
     ]
 
     if (self.params.staged_vars and
-        self.params.variable_update != 'parameter_server' and
-        self.params.variable_update != 'horovod'):
+        self.params.variable_update != 'parameter_server'):
       raise ValueError('staged_vars for now is only supported with '
-                       'variable_update=parameter_server or with'
-                       'variable_update=horovod')
+                       'variable_update=parameter_server')
 
-    if (self.params.variable_update == 'parameter_server' or
-        self.params.variable_update == 'horovod'):
+    if self.params.variable_update in ('parameter_server', 'horovod'):
       if self.job_name:
         if not self.params.staged_vars:
           self.variable_mgr = variable_mgr.VariableMgrDistributedFetchFromPS(
@@ -1029,12 +1035,13 @@ class BenchmarkCNN(object):
       variable_mgr_init_ops.extend(self.variable_mgr.get_post_init_ops())
     local_var_init_op_group = tf.group(*variable_mgr_init_ops)
 
-    is_chief = (not self.job_name or self.task_index == 0)
     if self.params.variable_update == 'horovod':
       import horovod.tensorflow as hvd
-      if hvd.rank() > 0:
-        # Only first worker can be chief.
-        is_chief = False
+      # First worker will be 'chief' - it will write summaries and
+      # save checkpoints.
+      is_chief = hvd.rank() == 0
+    else:
+      is_chief = (not self.job_name or self.task_index == 0)
 
     summary_op = tf.summary.merge_all()
     summary_writer = None
@@ -1076,9 +1083,13 @@ class BenchmarkCNN(object):
     else:
       bcast_global_variables_op = None
     sv = tf.train.Supervisor(
-        # For the purpose of Supervisor, all Horovod workers are 'chiefs'.
+        # For the purpose of Supervisor, all Horovod workers are 'chiefs',
+        # since we want session to be initialized symmetrically on all the
+        # workers.
         is_chief=is_chief or self.params.variable_update == 'horovod',
-        logdir=self.params.train_dir,
+        # Log dir should be unset on non-chief workers to prevent Horovod
+        # workers to corrupting each other's checkpoints.
+        logdir=self.params.train_dir if is_chief else None,
         ready_for_local_init_op=ready_for_local_init_op,
         local_init_op=local_var_init_op_group,
         saver=saver,
