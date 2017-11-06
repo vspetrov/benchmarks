@@ -688,7 +688,7 @@ class BenchmarkCNN(object):
     if self.params.variable_update == 'horovod' and self.params.num_gpus > 1:
       raise ValueError('Horovod benchmarks require num_gpus=1 on each worker')
 
-    if self.params.variable_update == 'horovod' and self.job_name:
+    if self.params.variable_update == 'horovod' and self.params.job_name:
       raise ValueError('job_name should not be specified for Horovod.')
 
     # Use the batch size from the command line if specified, otherwise use the
