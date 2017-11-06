@@ -688,6 +688,9 @@ class BenchmarkCNN(object):
     if self.params.variable_update == 'horovod' and self.params.num_gpus > 1:
       raise ValueError('Horovod benchmarks require num_gpus=1 on each worker')
 
+    if self.params.variable_update == 'horovod' and self.job_name:
+      raise ValueError('job_name should not be specified for Horovod.')
+
     # Use the batch size from the command line if specified, otherwise use the
     # model's default batch size.  Scale the benchmark's batch size by the
     # number of GPUs.
@@ -772,7 +775,7 @@ class BenchmarkCNN(object):
       raise ValueError('staged_vars for now is only supported with '
                        'variable_update=parameter_server')
 
-    if self.params.variable_update in ('parameter_server', 'horovod'):
+    if self.params.variable_update == 'parameter_server':
       if self.job_name:
         if not self.params.staged_vars:
           self.variable_mgr = variable_mgr.VariableMgrDistributedFetchFromPS(
@@ -804,7 +807,7 @@ class BenchmarkCNN(object):
         raise ValueError('Invalid variable_update in local mode: %s' %
                          self.params.variable_update)
       self.variable_mgr = variable_mgr.VariableMgrDistributedReplicated(self)
-    elif self.params.variable_update == 'independent':
+    elif self.params.variable_update in ('independent', 'horovod'):
       if self.job_name:
         raise ValueError('Invalid variable_update in distributed mode: %s' %
                          self.params.variable_update)
