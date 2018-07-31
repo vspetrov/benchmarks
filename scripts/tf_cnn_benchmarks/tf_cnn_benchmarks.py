@@ -590,7 +590,12 @@ def add_image_preprocessing(dataset, input_nchan, image_size, batch_size,
 
 
 def create_config_proto():
-  config = tf.ConfigProto()
+  per_gpu_mem = os.environ.get('HOROVOD_PER_GPU_MEM')
+  if per_gpu_mem:
+    config = tf.ConfigProto(gpu_options=tf.GPUOptions(per_process_gpu_memory_fraction=float(per_gpu_mem)))
+    print ("HOROVOD_PER_GPU_MEM=", per_gpu_mem)
+  else:
+    config = tf.ConfigProto()
   config.allow_soft_placement = True
   config.intra_op_parallelism_threads = FLAGS.num_intra_threads
   config.gpu_options.force_gpu_compatible = FLAGS.force_gpu_compatible
